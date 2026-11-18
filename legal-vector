@@ -1,0 +1,85 @@
+// ==========================================
+// Lab 11: Legal Documents Vector Search
+// ==========================================
+
+// Step 1: Switch to Legal Search Database
+use('legalDB');
+
+// Clean up existing documents for fresh run
+db.legalDocs.deleteMany({});
+
+// Step 2: Insert Legal Documents with pre-computed Vector Embeddings
+const insertResult = db.legalDocs.insertMany([
+  {
+    docId: "LEG-2026-88",
+    title: "Non-Disclosure Agreement Clause 4",
+    clauseType: "Confidentiality",
+    text: "Receiving party agrees not to disclose proprietary trade secrets to third parties.",
+    // Simplified 4-dimensional vector embedding representation
+    embedding: [0.12, -0.45, 0.88, 0.31]
+  },
+  {
+    docId: "LEG-2026-92",
+    title: "Employment Contract Termination Clause",
+    clauseType: "Termination",
+    text: "Either party may terminate this agreement with a 30-day prior written notice.",
+    embedding: [-0.65, 0.22, 0.05, 0.91]
+  }
+]);
+
+console.log(`Inserted ${Object.keys(insertResult.insertedIds).length} legal documents.`);
+
+// Step 3: Semantic Search Aggregation (Simulated KNN Vector Search Pipeline)
+// Input query embedding for "keeping secrets hidden": [0.10, -0.42, 0.85, 0.30]
+console.log("\n--- Executing Semantic Vector Search ---");
+console.log("Query: 'keeping secrets hidden' | Query Vector: [0.10, -0.42, 0.85, 0.30]");
+
+try {
+  const searchResults = db.legalDocs.aggregate([
+    {
+      $vectorSearch: {
+        index: "vector_index",
+        path: "embedding",
+        queryVector: [0.10, -0.42, 0.85, 0.30],
+        numCandidates: 10,
+        limit: 1
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        title: 1,
+        clauseType: 1,
+        text: 1,
+        score: { $meta: "vectorSearchScore" }
+      }
+    }
+  ]).toArray();
+
+  console.log("\n--- Vector Search Results (Atlas) ---");
+  console.log(JSON.stringify(searchResults, null, 2));
+} catch (error) {
+  // $vectorSearch requires MongoDB Atlas or Atlas CLI local deployment with Search enabled
+  console.log("\n[Notice] MongoDB Atlas Vector Search requires an active Atlas cluster or Atlas CLI local deployment with Search enabled.");
+  console.log("[Simulation] Calculating exact Cosine Similarity KNN match locally:");
+
+  const queryVector = [0.10, -0.42, 0.85, 0.30];
+  const cosineSimilarity = (a, b) => {
+    const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
+    const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+    const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+    return dot / (magA * magB);
+  };
+
+  const docs = db.legalDocs.find().toArray();
+  const simulatedResults = docs.map(doc => ({
+    title: doc.title,
+    clauseType: doc.clauseType,
+    text: doc.text,
+    score: cosineSimilarity(doc.embedding, queryVector)
+  }))
+  .sort((a, b) => b.score - a.score)
+  .slice(0, 1);
+
+  console.log(JSON.stringify(simulatedResults, null, 2));
+}
